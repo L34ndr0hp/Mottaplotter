@@ -117,7 +117,7 @@ def obtener_config_api(device_id):
     headers = {"Authorization": token, "Account": "33"}
     dev_id = device_id.replace("CMWS", "").replace("_mig", "")
     r = requests.get(f"https://api.clickie.io/v4/gateways/devices/{dev_id}/config",
-                     headers=headers)
+                     headers=headers, timeout=30)
     if r.status_code != 200:
         raise ValueError(f"Error API (status {r.status_code}): {r.text}")
     data = r.json()
@@ -125,11 +125,17 @@ def obtener_config_api(device_id):
     config_raw = data.get("data", {}).get("config") or data.get("config") or data.get("data")
     if config_raw is None:
         raise ValueError("Respuesta sin campo 'config'")
-    if isinstance(config_raw, dict):
-        return config_raw
     if isinstance(config_raw, str):
-        return json.loads(config_raw)
-    raise ValueError(f"Formato inesperado en campo 'config': {type(config_raw)}")
+        config_raw = json.loads(config_raw)
+    if not isinstance(config_raw, dict):
+        raise ValueError(f"Formato inesperado en campo 'config': {type(config_raw)}")
+    # El config puede venir envuelto en una capa extra con "config" adentro
+    # (algunos dispositivos retornan {config: {lambda_functions: ...}})
+    if "config" in config_raw and "lambda_functions" not in config_raw:
+        config_raw = config_raw["config"]
+    if "lambda_functions" not in config_raw:
+        raise ValueError(f"'lambda_functions' no encontrado. Claves disponibles: {list(config_raw.keys())}")
+    return config_raw
 
 # ─── Lógica de horarios ─────────────────────────────────────────────────────────
 def time_to_seconds(t):
