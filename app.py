@@ -121,10 +121,15 @@ def obtener_config_api(device_id):
     if r.status_code != 200:
         raise ValueError(f"Error API (status {r.status_code}): {r.text}")
     data = r.json()
-    config_str = data.get("data", {}).get("config")
-    if not config_str:
+    # El campo config puede venir como string (endpoint anterior) o como dict (nuevo endpoint)
+    config_raw = data.get("data", {}).get("config") or data.get("config") or data.get("data")
+    if config_raw is None:
         raise ValueError("Respuesta sin campo 'config'")
-    return json.loads(config_str)
+    if isinstance(config_raw, dict):
+        return config_raw
+    if isinstance(config_raw, str):
+        return json.loads(config_raw)
+    raise ValueError(f"Formato inesperado en campo 'config': {type(config_raw)}")
 
 # ─── Lógica de horarios ─────────────────────────────────────────────────────────
 def time_to_seconds(t):
