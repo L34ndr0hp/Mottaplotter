@@ -122,18 +122,42 @@ def obtener_config_api(device_id):
         raise ValueError(f"Error API (status {r.status_code}): {r.text}")
     data = r.json()
 
-    # Log diagnóstico temporal — muestra estructura de la respuesta
-    top_keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
-    data_val = data.get("data") if isinstance(data, dict) else None
-    data_keys = list(data_val.keys()) if isinstance(data_val, dict) else (type(data_val).__name__ if data_val is not None else "None")
-    config_val = data_val.get("config") if isinstance(data_val, dict) else None
-    config_type = type(config_val).__name__
-    config_keys = list(config_val.keys()) if isinstance(config_val, dict) else "N/A"
-    raise ValueError(
-        f"DIAGNÓSTICO — top_keys: {top_keys} | "
-        f"data type: {type(data_val).__name__} | data_keys: {data_keys} | "
-        f"config type: {config_type} | config_keys: {config_keys[:5] if isinstance(config_keys, list) else config_keys}"
-    )
+    # Buscar config con checks explícitos (no usar `or` porque un dict vacío es falsy)
+    config_raw = None
+    if isinstance(data.get("data"), dict):
+        c = data["data"].get("config")
+        if c is not None:
+            config_raw = c
+    if config_raw is None and data.get("config") is not None:
+        config_raw = data["config"]
+    if config_raw is None:
+        config_raw = data
+
+    if isinstance(config_raw, str):
+        config_raw = json.loads(config_raw)
+
+    if not isinstance(config_raw, dict):
+        raise ValueError(f"Formato inesperado en campo 'config': {type(config_raw)}")
+
+    # Config vacío: dispositivo sin configuración en este endpoint
+    if not config_raw:
+        raise ValueError(
+            f"La API devolvió una configuración vacía para el dispositivo '{dev_id}'. "
+            f"Es posible que este dispositivo no haya sido migrado al nuevo endpoint v4 "
+            f"o que su ID sea incorrecto. Prueba subir el JSON manualmente."
+        )
+
+    # Desenvolver si viene envuelto en una capa extra con "config" adentro
+    if "config" in config_raw and "lambda_functions" not in config_raw:
+        config_raw = config_raw["config"]
+
+    if "lambda_functions" not in config_raw:
+        raise ValueError(
+            f"'lambda_functions' no encontrado. "
+            f"Claves disponibles: {list(config_raw.keys())}"
+        )
+
+    return config_raw
 
     # Buscar config con checks explícitos (no usar `or` porque un dict vacío es falsy)
     config_raw = None
