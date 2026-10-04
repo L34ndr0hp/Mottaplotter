@@ -93,26 +93,44 @@ def obtener_token_clickie():
         raise ValueError("No se pudo obtener token Clickie")
     return token
 
+# Inventario desde la API v4: cuenta (= companyId) → asset (sucursal) → setup
+# (Clickiemota) → equipo instalado actualmente → device_custom_id (ID del gateway).
+def _v4_get(path, account_id):
+    token = obtener_token_clickie()
+    r = requests.get(f"https://api.clickie.io/v4{path}",
+                     headers={"Authorization": token, "Account": str(account_id)}, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    data = data.get("data", data) if isinstance(data, dict) else data
+    if isinstance(data, dict):
+        data = data.get("items", data)
+    return data
+
 @st.cache_data(ttl=600)
 def cargar_buildings(company_id):
-    token = obtener_token_clickie()
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    r = requests.get(f"https://api.clickie.io/v1/companies/{company_id}/buildings", headers=headers)
-    r.raise_for_status()
-    buildings = r.json()["data"]
-    return {b["building_name"]: b["id_building"] for b in buildings}
+    assets = _v4_get("/assets?limit=1000", company_id)
+    return {a["asset_name"]: a["id_asset"]
+            for a in sorted(assets, key=lambda a: a["asset_name"])
+            if not a.get("asset_archived")}
 
 @st.cache_data(ttl=600)
 def cargar_devices(company_id, building_id, model_id):
-    token = obtener_token_clickie()
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    r = requests.get(f"https://api.clickie.io/v1/companies/{company_id}/devices", headers=headers)
-    r.raise_for_status()
-    devices = r.json()["data"]
-    filtered = [d for d in devices
-                if d["id_building"] == building_id and d["id_device_model"] == model_id]
-    return {(d.get("setup_name") or d["device_identifier"]): d["device_identifier"]
-            for d in filtered}
+    setups = _v4_get(f"/setups?id_asset={building_id}&id_device_model={model_id}&limit=200", company_id)
+    resultado = {}
+    for s in setups:
+        if s.get("setup_archived") or s.get("id_device_model") != model_id:
+            continue
+        instalaciones = [i for i in _v4_get(f"/setups/{s['id_setup']}/devices", company_id)
+                         if not i.get("setup_uninstall_date")]
+        if not instalaciones:
+            continue  # Clickiemota sin equipo instalado
+        actual = max(instalaciones, key=lambda i: i.get("setup_install_date") or "")
+        device = _v4_get(f"/devices/{actual['id_device']}", company_id)
+        device_id = device.get("device_custom_id") if isinstance(device, dict) else None
+        if device_id:
+            nombre = s.get("setup_name") or device_id
+            resultado[nombre if nombre not in resultado else f"{nombre} ({device_id})"] = device_id
+    return resultado
 
 def obtener_config_api(device_id):
     token = obtener_token_clickie()
