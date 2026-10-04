@@ -210,7 +210,12 @@ def calcular_eventos(config_data, rango_ini, rango_fin):
     cfg = desenvolver_config(config_data)
     rc = cfg.get("lambda_functions", {}).get("GG_relay_control")
     if not rc:
-        raise ValueError("La configuración no tiene 'GG_relay_control' (sin relés para graficar).")
+        funciones = ", ".join(cfg.get("lambda_functions", {}).keys()) or "ninguna"
+        raise ValueError(
+            f"El equipo '{cfg.get('name', '?')}' (ID {cfg.get('id', '?')}) no tiene control de relés "
+            f"(falta 'GG_relay_control'); probablemente es una Clickiemota solo de medición. "
+            f"Funciones configuradas: {funciones}. Prueba con otra Clickiemota de la sucursal."
+        )
 
     series = _catalogo_series(rc)
     refs = _referencias(rc)
