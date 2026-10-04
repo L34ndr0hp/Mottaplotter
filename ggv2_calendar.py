@@ -387,13 +387,11 @@ body{background:#fff;font-family:Inter,Arial,sans-serif;color:#1f2937;padding:14
 .col.hoyc{background:#ECFDF3}
 .ev{position:absolute;border-radius:3px;overflow:hidden;color:#fff;font-size:11px;line-height:15px;
     padding:3px 5px;text-shadow:0 0 2px rgba(0,0,0,.25);border:1px solid rgba(0,0,0,.06)}
-.ev.extension{background-image:repeating-linear-gradient(-45deg,rgba(255,255,255,.38) 0 6px,transparent 6px 14px)}
-.ev.special{background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.20) 0 3px,transparent 3px 8px)}
 .ev.ext_off{background:rgba(255,255,255,.7) !important;border:2px dashed;color:#374151;text-shadow:none}
 .ahora{position:absolute;left:0;right:0;height:0;border-top:1.5px solid #ef4444;z-index:5}
 .req{position:absolute;right:0;width:6px;z-index:4}
 .req.ok{background:#2E7D32}.req.bad{background:#C62828}
-.esp{position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(107,114,128,.06) 0 4px,transparent 4px 10px);pointer-events:none}
+.esp{position:absolute;inset:0;pointer-events:none}
 #btnCopy{position:fixed;top:10px;right:14px;z-index:20;background:#378ADD;color:#fff;border:none;border-radius:6px;
          padding:7px 12px;font-size:12px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.2)}
 #copyMsg{position:fixed;top:14px;right:130px;z-index:20;font-size:11px;color:#2E7D32;display:none;background:#fff;
@@ -405,8 +403,8 @@ body{background:#fff;font-family:Inter,Arial,sans-serif;color:#1f2937;padding:14
   <div class="series" id="series"></div>
   <div class="estilos">
     <span><i class="mu"></i>horario regular</span>
-    <span><i class="mu" style="background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.3) 0 2px,transparent 2px 5px)"></i>día especial</span>
-    <span><i class="mu" style="background-image:repeating-linear-gradient(-45deg,rgba(255,255,255,.5) 0 3px,transparent 3px 7px)"></i>extensión</span>
+    <span><i class="mu pat-special"></i>día especial</span>
+    <span><i class="mu pat-extension"></i>extensión</span>
     <span><i class="mu" style="background:#fff;border:2px dashed #6b7280"></i>extensión apagando</span>
     <span id="lgReq" style="display:none"><i class="mu" style="background:#2E7D32;width:6px"></i>cumple solicitud
       <i class="mu" style="background:#C62828;width:6px;margin-left:8px"></i>no cumple</span>
@@ -425,6 +423,30 @@ body{background:#fff;font-family:Inter,Arial,sans-serif;color:#1f2937;padding:14
 <button id="btnCopy" onclick="copiar()">📋 Copiar</button>
 
 <script>
+// Rayados como imágenes de patrón (html2canvas no dibuja repeating-linear-gradient,
+// y así la imagen PNG del ticket conserva los estilos)
+(function () {
+  function patron(color, tam, grosor, sentido) {
+    const c = document.createElement('canvas');
+    c.width = c.height = tam;
+    const x = c.getContext('2d');
+    x.strokeStyle = color; x.lineWidth = grosor;
+    for (const k of [-tam, 0, tam]) {
+      x.beginPath();
+      if (sentido === '/') { x.moveTo(k, tam); x.lineTo(k + tam, 0); }
+      else { x.moveTo(k, 0); x.lineTo(k + tam, tam); }
+      x.stroke();
+    }
+    return `url(${c.toDataURL()})`;
+  }
+  const ext = patron('rgba(255,255,255,.42)', 14, 5, '\\');
+  const esp = patron('rgba(0,0,0,.22)', 8, 2.5, '/');
+  const dia = patron('rgba(107,114,128,.10)', 10, 3, '/');
+  const css = document.createElement('style');
+  css.textContent = `.ev.extension,.pat-extension{background-image:${ext}}`
+    + `.ev.special,.pat-special{background-image:${esp}}.esp{background-image:${dia}}`;
+  document.head.appendChild(css);
+})();
 const D = __DATOS__;
 const HH = 32;
 const DIAS = ['Lu','Ma','Mi','Ju','Vi','Sá','Do'];

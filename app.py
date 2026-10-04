@@ -15,6 +15,15 @@ from googleapiclient.http import MediaIoBaseUpload
 import re as _re_top
 
 from ggv2_calendar import es_config_ggv2, build_calendar_html
+import base64
+import hashlib
+import streamlit.components.v1 as components
+
+# Componente que muestra el gráfico y devuelve un PNG de la vista actual (para el ticket)
+_grafico_png = components.declare_component(
+    "grafico_png",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "componentes", "grafico_png"),
+)
 
 # ─── Configuración de página ───────────────────────────────────────────────────
 st.set_page_config(
@@ -1560,6 +1569,7 @@ def main():
                         st.session_state["chart_w"]      = chart_w
                         st.session_state["chart_h"]      = chart_h
                         st.session_state["chart_ggv2"]   = es_ggv2
+                        st.session_state.pop("chart_png", None)  # se recaptura del nuevo gráfico
                         st.session_state["config_data"]  = config_data
                         st.session_state["sucursal_sel"] = sucursal
                         st.success("✅ Calendario generado (formato GGv2)" if es_ggv2
@@ -1669,12 +1679,20 @@ def main():
             st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
         st.subheader(f"Programación — {st.session_state.get('sucursal_sel', '')}")
-        st.components.v1.html(
-            st.session_state["chart_html"],
+        chart_html = st.session_state["chart_html"]
+        captura = _grafico_png(
+            html=chart_html,
             height=(st.session_state["chart_h"] if st.session_state.get("chart_ggv2")
-                    else min(st.session_state["chart_h"] + 70, 900)),
-            scrolling=True,
+                    else st.session_state["chart_h"] + 70),
+            key="grafico_" + hashlib.md5(chart_html.encode("utf-8")).hexdigest(),
+            default=None,
         )
+        if captura and captura.get("png"):
+            st.session_state["chart_png"] = captura["png"]
+            st.caption("🖼️ Imagen para el ticket lista — al crear el ticket se guarda como PNG "
+                       "la vista que estás viendo.")
+        else:
+            st.caption("⏳ Preparando imagen para el ticket…")
 
 
 def _crear_ticket(creds, ticket_num, empresa, sucursal, estado, tipo_ticket,
@@ -1697,15 +1715,23 @@ def _crear_ticket(creds, ticket_num, empresa, sucursal, estado, tipo_ticket,
                     imagen_upload.type, child_id
                 )
             elif tipo_ticket not in TIPOS_SIN_ADJUNTO and "chart_html" in st.session_state:
-                # Exportar HTML a PNG via st.components no es posible en server-side,
-                # subimos el HTML directamente como archivo visualizable
-                html_bytes = st.session_state["chart_html"].encode("utf-8")
-                fname = (f"ticket_{ticket_num}_{sucursal}_programacion.html"
-                         if tipo_ticket != "Cambio Horario Base"
-                         else f"ticket_{ticket_num}_{sucursal}_horario_base.html")
-                link_adjunto = upload_to_drive(
-                    drive_service, html_bytes, fname, "text/html", child_id
-                )
+                base = (f"ticket_{ticket_num}_{sucursal}_programacion"
+                        if tipo_ticket != "Cambio Horario Base"
+                        else f"ticket_{ticket_num}_{sucursal}_horario_base")
+                png = st.session_state.get("chart_png")
+                if png and png.startswith("data:image/png;base64,"):
+                    # PNG capturado en el navegador (vista actual del gráfico)
+                    link_adjunto = upload_to_drive(
+                        drive_service, base64.b64decode(png.split(",", 1)[1]),
+                        f"{base}.png", "image/png", child_id
+                    )
+                else:
+                    # Respaldo: la imagen aún no se capturó → se sube el HTML
+                    st.warning("La imagen del gráfico aún no estaba lista; se adjuntó el HTML.")
+                    link_adjunto = upload_to_drive(
+                        drive_service, st.session_state["chart_html"].encode("utf-8"),
+                        f"{base}.html", "text/html", child_id
+                    )
 
             # Nombre del programador desde email
             email_prefix = user_email.split("@")[0]
