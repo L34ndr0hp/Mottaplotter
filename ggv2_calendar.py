@@ -1,4 +1,4 @@
-"""Calendario semanal para configuraciones GGv2 (json_version v4.x).
+"""Calendario (rango de fechas / semanal) para configuraciones GGv2 (json_version v4.x).
 
 Modelo de datos GGv2 en GG_relay_control:
   channel_schedules[tipo]["N"]            → horario normal {name, config:[{days, status:{on|off}}]}
@@ -298,8 +298,11 @@ def calcular_eventos(config_data, rango_ini, rango_fin):
 # ─── HTML ──────────────────────────────────────────────────────────────────────
 def build_calendar_html(config_data, sucursal_name, start_date, end_date, solicitud_data=None):
     hoy = date.today()
-    rango_ini = _lunes(start_date) - timedelta(days=7)
-    rango_fin = _lunes(end_date) + timedelta(days=13)
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    # Margen de 3 semanas a cada lado para poder desplazarse por el calendario
+    rango_ini = _lunes(start_date) - timedelta(days=21)
+    rango_fin = end_date + timedelta(days=27)
     # Incluir la semana actual si está razonablemente cerca del rango pedido
     if abs((hoy - start_date).days) <= 120:
         rango_ini = min(rango_ini, _lunes(hoy))
@@ -339,7 +342,8 @@ def build_calendar_html(config_data, sucursal_name, start_date, end_date, solici
         "dias_especiales": dias_especiales,
         "rango_ini": rango_ini.isoformat(),
         "rango_fin": rango_fin.isoformat(),
-        "semana_inicial": _lunes(start_date).isoformat(),
+        "sel_ini": start_date.isoformat(),
+        "sel_fin": end_date.isoformat(),
         "solicitud": solicitud,
     }
     html = _PLANTILLA.replace("__DATOS__", json.dumps(datos, ensure_ascii=False).replace("</", "<\\/"))
@@ -368,9 +372,13 @@ body{background:#fff;font-family:Inter,Arial,sans-serif;color:#1f2937;padding:14
 .nav button,.hoy{border:none;background:#f3f4f6;color:#6b7280;font-size:16px;padding:6px 14px;cursor:pointer;border-radius:8px}
 .nav button:disabled,.hoy:disabled{opacity:.35;cursor:default}
 .hoy{font-size:13px}
-.rango{flex:1;text-align:center;font-size:22px;font-weight:700;color:#1f2937;margin-right:120px}
+.rango{flex:1;text-align:center;font-size:20px;font-weight:700;color:#1f2937;margin-right:20px}
 .resumen{font-size:12px;margin:-4px 0 10px 0;padding:6px 10px;border-radius:6px;display:none}
-.grid{display:grid;grid-template-columns:52px repeat(7,1fr);border:1px solid #eef0f3;border-radius:6px}
+.grid{display:grid;border:1px solid #eef0f3;border-radius:6px}
+.cab.sel{background:#FEF6DC;color:#7A4F00;font-weight:700;box-shadow:inset 0 -3px 0 #E0A800}
+.modo{display:flex;background:#f3f4f6;border-radius:8px;padding:2px}
+.modo button{border:none;background:transparent;color:#6b7280;font-size:12px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.modo button.act{background:#fff;color:#1f2937;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .cab{height:40px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:15px;
      font-weight:500;border-left:1px solid #eef0f3;border-bottom:1px solid #eef0f3}
 .cab small{font-size:9px;color:#B45309;font-weight:600}
@@ -404,8 +412,10 @@ body{background:#fff;font-family:Inter,Arial,sans-serif;color:#1f2937;padding:14
       <i class="mu" style="background:#C62828;width:6px;margin-left:8px"></i>no cumple</span>
   </div>
   <div class="barra">
-    <div class="nav"><button id="prev">&#8249;</button><button id="next">&#8250;</button></div>
+    <div class="nav"><button id="prevN" title="Retroceder una vista">&laquo;</button><button id="prev" title="Retroceder un día">&#8249;</button><button id="next" title="Avanzar un día">&#8250;</button><button id="nextN" title="Avanzar una vista">&raquo;</button></div>
     <button class="hoy" id="hoy">hoy</button>
+    <button class="hoy" id="volver" title="Volver al rango de fechas seleccionado">rango solicitado</button>
+    <div class="modo"><button id="mRango">Rango</button><button id="mSemana">Semana</button></div>
     <div class="rango" id="rango"></div>
   </div>
   <div class="resumen" id="resumen"></div>
@@ -432,9 +442,22 @@ const lunes = d => sumar(d, -((d.getDay() + 6) % 7));
 const hhmm = s => s >= 86400 ? '00:00' : String(Math.floor(s / 3600)).padStart(2, '0') + ':' + String(Math.floor(s % 3600 / 60)).padStart(2, '0');
 const esc = t => String(t).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 
-const R0 = pISO(D.rango_ini), R1 = lunes(pISO(D.rango_fin));
+const R0 = pISO(D.rango_ini), RMAX = pISO(D.rango_fin);
+const SEL0 = pISO(D.sel_ini), SEL1 = pISO(D.sel_fin);
 const HOY = new Date(); HOY.setHours(0, 0, 0, 0);
-let semana = pISO(D.semana_inicial);
+const diasEntre = (a, b) => Math.round((b - a) / 86400000);
+// Vista "Rango": desde el día anterior al inicio hasta el día siguiente al fin (máx. 14 días)
+const N_RANGO = Math.min(Math.max(diasEntre(SEL0, SEL1) + 3, 3), 14);
+let modo = 'rango';
+let n = N_RANGO;
+let inicio = sumar(SEL0, -1);
+const fmt = (d, anio) => `${DIAS[(d.getDay() + 6) % 7]} ${d.getDate()} ${MESES[d.getMonth()]}` + (anio ? ` ${d.getFullYear()}` : '');
+function mover(nuevo) {
+  const max = sumar(RMAX, -(n - 1));
+  inicio = nuevo < R0 ? R0 : (nuevo > max ? max : nuevo);
+  render();
+}
+function irRango() { modo = 'rango'; n = N_RANGO; mover(sumar(SEL0, -1)); }
 
 const req = D.solicitud ? {
   ini: new Date(D.solicitud.ini), fin: new Date(D.solicitud.fin), series: new Set(D.solicitud.series)
@@ -503,29 +526,31 @@ function renderResumen() {
 
 function render() {
   renderSeries();
-  const d6 = sumar(semana, 6);
-  document.getElementById('rango').textContent = semana.getFullYear() === d6.getFullYear()
-    ? (semana.getMonth() === d6.getMonth()
-        ? `${semana.getDate()} – ${d6.getDate()} ${MESES[d6.getMonth()]} ${d6.getFullYear()}`
-        : `${semana.getDate()} ${MESES[semana.getMonth()]} – ${d6.getDate()} ${MESES[d6.getMonth()]} ${d6.getFullYear()}`)
-    : `${semana.getDate()} ${MESES[semana.getMonth()]} ${semana.getFullYear()} – ${d6.getDate()} ${MESES[d6.getMonth()]} ${d6.getFullYear()}`;
-  document.getElementById('prev').disabled = semana <= R0;
-  document.getElementById('next').disabled = semana >= R1;
-  const semHoy = lunes(HOY);
-  document.getElementById('hoy').disabled = semHoy < R0 || semHoy > R1 || +semHoy === +semana;
+  const dn = sumar(inicio, n - 1);
+  document.getElementById('rango').textContent = `${fmt(inicio, inicio.getFullYear() !== dn.getFullYear())} – ${fmt(dn, true)}`;
+  document.getElementById('prev').disabled = document.getElementById('prevN').disabled = inicio <= R0;
+  document.getElementById('next').disabled = document.getElementById('nextN').disabled = dn >= RMAX;
+  document.getElementById('hoy').disabled = HOY < R0 || HOY > RMAX || (HOY >= inicio && HOY <= dn);
+  document.getElementById('volver').disabled = modo === 'rango' && +inicio === +sumar(SEL0, -1);
+  document.getElementById('mRango').className = modo === 'rango' ? 'act' : '';
+  document.getElementById('mSemana').className = modo === 'semana' ? 'act' : '';
 
   const g = document.getElementById('grid');
+  g.style.gridTemplateColumns = `52px repeat(${n},1fr)`;
   let h = '<div class="cab" style="border-left:none"></div>';
-  for (let i = 0; i < 7; i++) {
-    const d = sumar(semana, i), esp = D.dias_especiales[iso(d)];
-    h += `<div class="cab">${DIAS[i]} ${d.getDate()}${esp ? `<small>★ ${esc(esp.join(', '))}</small>` : ''}</div>`;
+  for (let i = 0; i < n; i++) {
+    const d = sumar(inicio, i), esp = D.dias_especiales[iso(d)];
+    const sel = d >= SEL0 && d <= SEL1;
+    const mes = (i === 0 || d.getDate() === 1) ? `/${String(d.getMonth() + 1).padStart(2, '0')}` : '';
+    h += `<div class="cab${sel ? ' sel' : ''}" title="${sel ? 'Dentro del rango solicitado' : ''}">${DIAS[(d.getDay() + 6) % 7]} ${d.getDate()}${mes}`
+      + `${esp ? `<small>★ ${esc(esp.join(', '))}</small>` : ''}</div>`;
   }
   h += '<div class="horas" style="position:relative;height:' + 24 * HH + 'px">';
   for (let k = 0; k < 24; k++) h += `<div style="position:absolute;top:${k * HH}px;right:0;line-height:16px">${String(k).padStart(2, '0')}:00</div>`;
   h += '</div>';
 
-  for (let i = 0; i < 7; i++) {
-    const d = sumar(semana, i), f = iso(d);
+  for (let i = 0; i < n; i++) {
+    const d = sumar(inicio, i), f = iso(d);
     const lineas = `background-image:repeating-linear-gradient(to bottom,transparent 0 ${HH - 1}px,#eef0f3 ${HH - 1}px ${HH}px)`;
     h += `<div class="col${+d === +HOY ? ' hoyc' : ''}" style="height:${24 * HH}px;${lineas}">`;
     if (D.dias_especiales[f]) h += '<div class="esp"></div>';
@@ -557,10 +582,15 @@ function render() {
   g.innerHTML = h;
 }
 
-document.getElementById('prev').onclick = () => { semana = sumar(semana, -7); render(); };
-document.getElementById('next').onclick = () => { semana = sumar(semana, 7); render(); };
-document.getElementById('hoy').onclick = () => { semana = lunes(HOY); render(); };
-render();
+document.getElementById('prev').onclick = () => mover(sumar(inicio, -1));
+document.getElementById('next').onclick = () => mover(sumar(inicio, 1));
+document.getElementById('prevN').onclick = () => mover(sumar(inicio, -n));
+document.getElementById('nextN').onclick = () => mover(sumar(inicio, n));
+document.getElementById('hoy').onclick = () => mover(modo === 'semana' ? lunes(HOY) : sumar(HOY, -1));
+document.getElementById('volver').onclick = irRango;
+document.getElementById('mRango').onclick = irRango;
+document.getElementById('mSemana').onclick = () => { modo = 'semana'; n = 7; mover(lunes(inicio)); };
+irRango();
 renderResumen();
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
