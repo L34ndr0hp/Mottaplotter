@@ -141,14 +141,16 @@ def cargar_devices(company_id, building_id, model_id):
             resultado[nombre if nombre not in resultado else f"{nombre} ({device_id})"] = device_id
     return resultado
 
-def obtener_config_api(device_id):
+def obtener_config_api(device_id, subscription="edge"):
+    """subscription: suscripción AWS del thing de donde se lee el JSON ("edge" o "core")."""
     token = obtener_token_clickie()
     headers = {"Authorization": token, "Account": "33"}
     dev_id = device_id.replace("CMWS", "").replace("_mig", "")
     r = requests.get(f"https://api.clickie.io/v4/gateways/devices/{dev_id}/config",
+                     params={"subscription": subscription},
                      headers=headers, timeout=30)
     if r.status_code != 200:
-        raise ValueError(f"Error API (status {r.status_code}): {r.text}")
+        raise ValueError(f"Error API {subscription} (status {r.status_code}): {r.text}")
     data = r.json()
 
     # Buscar config con checks explícitos (no usar `or` porque un dict vacío es falsy)
@@ -1477,6 +1479,14 @@ def main():
             key="sel_clickiemota"
         )
 
+        suscripcion = st.radio(
+            "Leer configuración desde",
+            ["edge", "core"],
+            horizontal=True,
+            key="sel_suscripcion",
+            help="Suscripción AWS de la Clickiemota de donde se rescata el JSON de configuración.",
+        )
+
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             _fi_default = st.session_state.get("_fecha_inicio_pre")
@@ -1548,7 +1558,7 @@ def main():
                         if json_file:
                             config_data = json.load(json_file)
                         else:
-                            config_data = obtener_config_api(device_map[clickiemota])
+                            config_data = obtener_config_api(device_map[clickiemota], suscripcion)
 
                         fi = fecha_inicio
                         ff = fecha_fin
