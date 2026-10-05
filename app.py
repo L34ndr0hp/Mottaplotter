@@ -142,15 +142,22 @@ def cargar_devices(company_id, building_id, model_id):
     return resultado
 
 def obtener_config_api(device_id, subscription="edge"):
-    """subscription: suscripción AWS del thing de donde se lee el JSON ("edge" o "core")."""
+    """subscription: suscripción AWS del thing de donde se lee el JSON ("edge" o "core").
+    Sin device_read=true la API devuelve la copia en la nube (igual para edge y core),
+    por eso se lee desde el thing; si falla se usa esa copia como respaldo."""
     token = obtener_token_clickie()
     headers = {"Authorization": token, "Account": "33"}
     dev_id = device_id.replace("CMWS", "").replace("_mig", "")
-    r = requests.get(f"https://api.clickie.io/v4/gateways/devices/{dev_id}/config",
-                     params={"subscription": subscription},
-                     headers=headers, timeout=30)
+    url = f"https://api.clickie.io/v4/gateways/devices/{dev_id}/config"
+    r = requests.get(url, params={"subscription": subscription, "device_read": "true"},
+                     headers=headers, timeout=60)
     if r.status_code != 200:
-        raise ValueError(f"Error API {subscription} (status {r.status_code}): {r.text}")
+        error_lectura = f"status {r.status_code}: {r.text[:200]}"
+        r = requests.get(url, params={"subscription": subscription}, headers=headers, timeout=30)
+        if r.status_code != 200:
+            raise ValueError(f"Error API {subscription} (status {r.status_code}): {r.text}")
+        st.warning(f"No se pudo leer el JSON directo desde {subscription} ({error_lectura}); "
+                   f"se muestra la copia guardada en la nube.")
     data = r.json()
 
     # Buscar config con checks explícitos (no usar `or` porque un dict vacío es falsy)
